@@ -189,18 +189,16 @@ if __name__ == '__main__':
     hidden_dim = 128
     output_dim = 5
 
-    chunks = []
+    df = pd.DataFrame()
 
     for offset in range(0, len_dataset, chunk_size):
-        query = f'SELECT * FROM YELP_REVIEW LIMIT {chunk_size} OFFSET {offset}'
+        query = f'SELECT stars, text FROM YELP_REVIEW LIMIT {chunk_size} OFFSET {offset}'
         chunk = select_values(conn, query)
-        chunks.append(chunks)
+        df_chunks = pd.DataFrame(chunk, columns= ['stars', 'text'])
+        df = pd.concat([df, df_chunks])
 
 
-    data = np.array(chunks)[:, 1:]
-
-
-    data_val, data_test = train_test_split(data, test_size= 0.1, random_state= 42)
+    data_val, data_test = train_test_split(df, test_size= 0.1, random_state= 42)
     data_train, data_val = train_test_split(data_val, test_size= 0.222)
 
     tokens, token_to_id, embedding_matrix = make_vocab(data_train, tokenizer, embedding_dim)
