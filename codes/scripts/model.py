@@ -16,13 +16,17 @@ from tqdm.auto import tqdm
 
 import re
 
-from connection import select_values, create_connection
+from connection import MySQLCRUD
 
 TARGET_COLUMN = 'stars'
 device = "cuda" if torch.cuda.is_available() else "cpu"
 UNK, PAD = "UNK", "PAD"
 UNK_IX = 0
 PAD_IX = 1
+
+data_sol = False
+
+MODEL_PATH = 'D:/Documentos/Estudos/Projeto-NLP/saved_model/lstm_model.pth'
 
 BATCH_SIZE = 128
 EPOCHS = 5
@@ -178,28 +182,37 @@ def clean_text(text):
 
 if __name__ == '__main__':
 
-    conn = create_connection()
+    config_path = 'D:/Documentos/Estudos/Projeto-NLP/config.json'
+    json_path = 'D:/Documentos/Estudos/Projeto-NLP/dataset/yelp_academic_dataset_review.json'
+    
+    if data_sol:
+        db_conn = MySQLCRUD(config_path)
+        table_name = 'YELP_REVIEW'
 
+        len_dataset = db_conn.select_values(f"SELECT COUNT(*) FROM {table_name}")
 
-    len_dataset = select_values(conn, 'SELECT count(*) FROM YELP_REVIEW;')[0][0]
+        chunk_size = 10000
+        tokenizer = nltk.tokenize.WordPunctTokenizer()
+        embedding_dim = 100
+        hidden_dim = 128
+        output_dim = 5
 
-    chunk_size = 10000
-    tokenizer = nltk.tokenize.WordPunctTokenizer()
-    embedding_dim = 100
-    hidden_dim = 128
-    output_dim = 5
+        df = pd.DataFrame()
 
-    df = pd.DataFrame()
-
-    for offset in range(0, len_dataset, chunk_size):
-        query = f'SELECT stars, text FROM YELP_REVIEW LIMIT {chunk_size} OFFSET {offset}'
-        chunk = select_values(conn, query)
-        df_chunks = pd.DataFrame(chunk, columns= ['stars', 'text'])
-        df = pd.concat([df, df_chunks])
-
+        for offset in range(0, len_dataset, chunk_size):
+            query = f'SELECT stars, text FROM YELP_REVIEW LIMIT {chunk_size} OFFSET {offset}'
+            chunk = db_conn.select_values(query)
+            df_chunks = pd.DataFrame(chunk, columns= ['stars', 'text'])
+            df = pd.concat([df, df_chunks])
+    else:
+        df = pd.DataFrame()
+        for chunk in pd.read_json(json_path, lines= True, chunksize= 100000):
+            df = pd.concat([df, chunk[['stars', 'text']]])
 
     data_val, data_test = train_test_split(df, test_size= 0.1, random_state= 42)
     data_train, data_val = train_test_split(data_val, test_size= 0.222)
+
+    data_test.to_csv('D:/Documentos/Estudos/Projeto-NLP/dataset/test_set/test_set.csv')
 
     tokens, token_to_id, embedding_matrix = make_vocab(data_train, tokenizer, embedding_dim)
 
@@ -225,4 +238,5 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
         print_metrics(model, data_val, device= device, criterion= criterion)  
-        
+    
+    torch.save(model.state_dict(), MODEL_PATH)

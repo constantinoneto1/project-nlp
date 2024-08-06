@@ -1,104 +1,97 @@
 import pandas as pd
 import mysql.connector as msc
 from mysql.connector import Error
-
 import json
 
-def create_connection():
-    try:
-        params = json.load(open('config.json', 'r'))
-
-        connection = msc.connect(
-            host= params['host'],
-            port= params['port'],
-            user= params['user'],
-            password= params['password'],
-            database= params['database']
-        )
-
-        return connection
-
-    except Error as e:
-        print(f'Error: {e}')
-        return None
-
-def create_table(connection, table_name):
-    cursor = connection.cursor()
+class MySQLCRUD:
+    def __init__(self, config_path):
+        self.connection = self.create_connection(config_path)
     
-    query = f'''
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            stars INT NOT NULL,
-            text VARCHAR(2000) NOT NULL
-        )
-    '''
-    try:
+    def create_connection(self, config_path):
+        try:
+            params = json.load(open(config_path, 'r'))
+            
+            connection = msc.connect(
+                host=params['host'],
+                port=params['port'],
+                user=params['user'],
+                password=params['password'],
+                database=params['database']
+            )
+            if connection.is_connected():
+                print('Connected successfully!')
+            return connection
+
+        except Error as e:
+            print(f'Error: {e}')
+            return None
+
+    def create_table(self, table_name):
+        cursor = self.connection.cursor()
+        
+        query = f'''
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                stars INT NOT NULL,
+                text VARCHAR(2000) NOT NULL
+            )
+        '''
+        try:
+            cursor.execute(query)
+            print('Table created successfully!')
+        except Error as e:
+            print(f'Error: {e}')
+        finally:
+            cursor.close()
+
+    def insert_values(self, df, table_name):
+        cursor = self.connection.cursor()
+
+        insert_query = f'''INSERT INTO {table_name} (stars, text) VALUES (%s, %s)'''
+
+        data = list(df.itertuples(index=False, name=None))
+
+        try:
+            cursor.executemany(insert_query, data)
+            self.connection.commit()
+            print('Data inserted successfully!')
+        except Error as e:
+            print(f'Insert Error: {e}')
+        finally:
+            cursor.close()
+
+    def select_values(self, query):
+        cursor = self.connection.cursor()
+
         cursor.execute(query)
+        result = cursor.fetchall()
 
-        print('Tabela criada com Sucesso!')
-    except Error as e:
-        print(f'Error: {e}')
-    finally:
         cursor.close()
+        return result
 
-
-def select_values(connection, query):
-
-    cursor = connection.cursor()
-
-    cursor.execute(query)
-    result = cursor.fetchall()
-
-
-    return result
-
-
-def insert_values(connection, df, table_name):
-    cursor = connection.cursor()
-
-    insert_query = f'''INSERT INTO {table_name} (stars, text) VALUES (%s, %s)'''
-
-    data = list(df.itertuples(index= False, name= None))
-
-    try:
-        cursor.executemany(insert_query, data)
-
-    except Error as e:
-        print(f'Insert Error: {e}')
-
-    finally:
-        cursor.close()    
-
+    def close_connection(self):
+        if self.connection.is_connected():
+            self.connection.close()
+            print('Connection closed successfully!')
 
 if __name__ == '__main__':
-    connection = create_connection()
-
+    config_path = 'D:/Documentos/Estudos/Projeto-NLP/config.json'
     table_name = 'YELP_REVIEW'
     json_path = 'dataset/yelp_academic_dataset_review.json'
 
+    crud = MySQLCRUD(config_path)
     i = 0
 
-    if connection.is_connected():   
-        print('Conectado com sucesso!')
+    crud.create_table(table_name)
 
-        create_table(connection, table_name)
+    for chunk in pd.read_json(json_path, lines=True, chunksize=10000):
+        chunk = chunk[['stars', 'text']]
+        chunk = chunk.loc[chunk['text'].str.len() < 2000]
 
-        for chunk in pd.read_json(json_path, lines= True, chunksize= 10000):
-            chunk = chunk[['stars', 'text']]
-            chunk = chunk.loc[chunk['text'].str.len() < 2000]
+        crud.insert_values(chunk, table_name)
 
-            insert_values(connection, chunk, table_name)
+        if i % 100 == 0:
+            print(f"{i} chunks inserted successfully!")
+        i += 1
 
-            connection.commit()
-            i += 1
-
-            if i % 100 == 0:
-                print(f"{i} chunks inserido com sucesso!")
-        
-        connection.close()
-
-
-
-
-
-
+    crud.close_connection()
