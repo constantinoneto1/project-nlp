@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from tqdm.auto import tqdm
 
+import pickle
 import re
 
 from connection import MySQLCRUD
@@ -26,10 +27,10 @@ PAD_IX = 1
 
 data_sol = False
 
-MODEL_PATH = 'D:/Documentos/Estudos/Projeto-NLP/saved_model/lstm_model.pth'
+MODEL_PATH = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/model/lstm_model_10_epoch.pth'
 
 BATCH_SIZE = 128
-EPOCHS = 5
+EPOCHS = 10
 
 class LSTMPredictor(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, embedding_matrix):
@@ -135,7 +136,7 @@ def as_matrix(sequences, max_len=None, UNK_IX= 0, PAD_IX= 1):
 
 def make_vocab(data, tokenizer, embedding_dim):
 
-    glove_path = 'D:/Documentos/Estudos/Projeto-NLP/dataset/glove.twitter.27B.100d.txt'
+    glove_path = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/glove.twitter.27B.100d.txt'
 
     all_text = ' '.join(data['text'].values)
     all_tokens = tokenizer.tokenize(all_text)
@@ -182,9 +183,12 @@ def clean_text(text):
 
 if __name__ == '__main__':
 
+    print(f'Rodando em {device}')
     config_path = 'D:/Documentos/Estudos/Projeto-NLP/config.json'
-    json_path = 'D:/Documentos/Estudos/Projeto-NLP/dataset/yelp_academic_dataset_review.json'
-    
+    json_path = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/yelp_academic_dataset_review.json'
+
+    val_loss = []
+
     if data_sol:
         db_conn = MySQLCRUD(config_path)
         table_name = 'YELP_REVIEW'
@@ -192,10 +196,6 @@ if __name__ == '__main__':
         len_dataset = db_conn.select_values(f"SELECT COUNT(*) FROM {table_name}")
 
         chunk_size = 10000
-        tokenizer = nltk.tokenize.WordPunctTokenizer()
-        embedding_dim = 100
-        hidden_dim = 128
-        output_dim = 5
 
         df = pd.DataFrame()
 
@@ -209,10 +209,19 @@ if __name__ == '__main__':
         for chunk in pd.read_json(json_path, lines= True, chunksize= 100000):
             df = pd.concat([df, chunk[['stars', 'text']]])
 
+    df['text'] = df['text'].apply(clean_text)
+
+
     data_val, data_test = train_test_split(df, test_size= 0.1, random_state= 42)
     data_train, data_val = train_test_split(data_val, test_size= 0.222)
 
-    data_test.to_csv('D:/Documentos/Estudos/Projeto-NLP/dataset/test_set/test_set.csv')
+    data_test.to_csv('C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/test_set/test_set.csv')
+
+    tokenizer = nltk.tokenize.WordPunctTokenizer()
+    
+    embedding_dim = 100
+    hidden_dim = 128
+    output_dim = 5
 
     tokens, token_to_id, embedding_matrix = make_vocab(data_train, tokenizer, embedding_dim)
 
@@ -237,6 +246,13 @@ if __name__ == '__main__':
             loss = criterion(pred, batch[TARGET_COLUMN]) 
             loss.backward()
             optimizer.step()
-        print_metrics(model, data_val, device= device, criterion= criterion)  
-    
+        avg_loss = print_metrics(model, data_val, device= device, criterion= criterion)  
+        val_loss.append(avg_loss)
+
+    try:
+        with open('val_values.txt', 'wb') as file:
+            pickle.dump(val_loss, file)
+    except:
+        pass
+
     torch.save(model.state_dict(), MODEL_PATH)
