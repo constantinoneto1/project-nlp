@@ -27,7 +27,7 @@ PAD_IX = 1
 
 data_sol = False
 
-MODEL_PATH = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/model/lstm_model_10_epoch.pth'
+MODEL_PATH = 'C:/Users/Rafael (Aluízio)/Documents/GitHub/project-nlp/model/'
 
 BATCH_SIZE = 128
 EPOCHS = 10
@@ -53,12 +53,12 @@ class LSTMPredictor(nn.Module):
 
         return out_fc
 
-def print_metrics(model, data, batch_size=BATCH_SIZE, name="", device=torch.device('cpu'), criterion= None, **kw):
+def print_metrics(model, data, batch_size=BATCH_SIZE, name="", token_to_id= None, device=torch.device('cpu'), criterion= None, **kw):
     total_loss = 0.0
     total = 0
     model.eval()
     with torch.no_grad():
-        for batch in iterate_minibatches(data, batch_size=batch_size, shuffle=False, device=device, **kw):
+        for batch in iterate_minibatches(data, token_to_id, batch_size=batch_size, shuffle=False, device=device, **kw):
             batch_pred = model(batch)
             loss = criterion(batch_pred, batch[TARGET_COLUMN])
             total_loss += loss.item() * batch[TARGET_COLUMN].size(0)
@@ -84,7 +84,7 @@ def to_tensors(batch, device):
 
     return batch_tensors
 
-def iterate_minibatches(data, batch_size=256, shuffle=True, cycle=False, device=device, **kwargs):
+def iterate_minibatches(data, token_to_id, batch_size=256, shuffle=True, cycle=False, device=device, **kwargs):
     """ iterates minibatches of data in random order """
     while True:
         indices = np.arange(len(data))
@@ -92,7 +92,7 @@ def iterate_minibatches(data, batch_size=256, shuffle=True, cycle=False, device=
             indices = np.random.permutation(indices)
 
         for start in range(0, len(indices), batch_size):
-            batch = make_batch(data.iloc[indices[start : start + batch_size]], device=device, **kwargs)
+            batch = make_batch(data.iloc[indices[start : start + batch_size]], token_to_id, device=device, **kwargs)
             yield batch
         
         if not cycle: break
@@ -102,14 +102,14 @@ def apply_word_dropout(matrix, keep_prop, replace_with= UNK_IX, pad_ix= PAD_IX,)
     dropout_mask &= matrix != pad_ix
     return np.choose(dropout_mask, [matrix, np.full_like(matrix, replace_with)])
 
-def make_batch(data, max_len=None, word_dropout=0, device=device):
+def make_batch(data, token_to_id, max_len=None, word_dropout=0, device=device):
     """
     Creates a keras-friendly dict from the batch data.
     :param word_dropout: replaces token index with UNK_IX with this probability
     :returns: a dict with {'title' : int64[batch, title_max_len]
     """
     batch = {}
-    batch["text"] = as_matrix(data["text"].values, max_len)
+    batch["text"] = as_matrix(data["text"].values, token_to_id, max_len)
     
     if word_dropout != 0:
         batch["text"] = apply_word_dropout(batch["text"], 1. - word_dropout)
@@ -119,7 +119,7 @@ def make_batch(data, max_len=None, word_dropout=0, device=device):
     
     return to_tensors(batch, device)
 
-def as_matrix(sequences, max_len=None, UNK_IX= 0, PAD_IX= 1):
+def as_matrix(sequences, token_to_id, max_len=None, UNK_IX= 0, PAD_IX= 1):
 
     """ Convert a list of tokens into a matrix with padding """
     if isinstance(sequences[0], str):
@@ -136,7 +136,7 @@ def as_matrix(sequences, max_len=None, UNK_IX= 0, PAD_IX= 1):
 
 def make_vocab(data, tokenizer, embedding_dim):
 
-    glove_path = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/glove.twitter.27B.100d.txt'
+    glove_path = 'C:/Users/Rafael (Aluízio)/Documents/GitHub/project-nlp/dataset/glove.twitter.27B.100d.txt'
 
     all_text = ' '.join(data['text'].values)
     all_tokens = tokenizer.tokenize(all_text)
@@ -185,7 +185,11 @@ if __name__ == '__main__':
 
     print(f'Rodando em {device}')
     config_path = 'D:/Documentos/Estudos/Projeto-NLP/config.json'
-    json_path = 'C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/yelp_academic_dataset_review.json'
+    json_path = 'C:/Users/Rafael (Aluízio)/Documents/GitHub/project-nlp/dataset/yelp_academic_dataset_review.json'
+
+    model_name = input('Selecione o nome do modelo (final .pth): ')
+
+    MODEL_PATH = MODEL_PATH + model_name
 
     val_loss = []
 
@@ -215,7 +219,7 @@ if __name__ == '__main__':
     data_val, data_test = train_test_split(df, test_size= 0.1, random_state= 42)
     data_train, data_val = train_test_split(data_val, test_size= 0.222)
 
-    data_test.to_csv('C:/Users/Rafael (Aluízio)/Desktop/Constantino/nlp-yelp/project-nlp/dataset/test_set/test_set.csv')
+    data_test.to_csv('C:/Users/Rafael (Aluízio)/Documents/GitHub/project-nlp/dataset/test_set/test_set.csv')
 
     tokenizer = nltk.tokenize.WordPunctTokenizer()
     
@@ -236,7 +240,7 @@ if __name__ == '__main__':
         print(f"Epoch: {epoch}")
         model.train()
         for i, batch in tqdm(enumerate(
-            iterate_minibatches(data_train, batch_size= BATCH_SIZE, device= device)),
+            iterate_minibatches(data_train, token_to_id= token_to_id, batch_size= BATCH_SIZE, device= device)),
             total = len(data_train) // BATCH_SIZE
         ):
             pred = model(batch)
@@ -246,7 +250,7 @@ if __name__ == '__main__':
             loss = criterion(pred, batch[TARGET_COLUMN]) 
             loss.backward()
             optimizer.step()
-        avg_loss = print_metrics(model, data_val, device= device, criterion= criterion)  
+        avg_loss = print_metrics(model, data_val, device= device, token_to_id= token_to_id, criterion= criterion)  
         val_loss.append(avg_loss)
 
     try:
