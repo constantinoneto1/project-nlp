@@ -33,22 +33,24 @@ BATCH_SIZE = 128
 EPOCHS = 10
 
 class LSTMPredictor(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, embedding_matrix):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, embedding_matrix, dropout= 0.3):
         super(LSTMPredictor, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
         self.embedding.weight = nn.Parameter(torch.tensor(embedding_matrix, dtype= torch.float32))
         self.embedding.weight.requires_grad = False
         self.lstm = nn.LSTM(embedding_dim, hidden_size= hidden_dim, batch_first= True)
         self.fc = nn.Linear(hidden_dim, output_dim)
-        
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         text = x['text']
 
         text_emb = self.embedding(text)
         out_lstm, (hidden, cel) = self.lstm(text_emb)
-        feat = hidden[-1]
+        feat = self.dropout(hidden[-1])
+        
         out_fc = self.fc(feat)
+
         # output = F.relu(out_fc)
 
         return out_fc
@@ -73,6 +75,30 @@ def print_metrics(model, data, batch_size=BATCH_SIZE, name="", token_to_id= None
     print("Cross-entropy loss: %.5f" % avg_loss)
 
     return avg_loss
+
+class EarlyStopping:
+    def __init__(self, patience=5, min_delta=0.0):
+        """
+        Args:
+            patience (int): How many epochs to wait after last time the validation loss improved.
+            min_delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = None
+        self.counter = 0
+        self.early_stop = False
+
+    def __call__(self, val_loss):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+        elif val_loss > self.best_loss - self.min_delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_loss = val_loss
+            self.counter = 0
 
 def to_tensors(batch, device):
     batch_tensors = dict()
@@ -215,9 +241,9 @@ if __name__ == '__main__':
 
     df['text'] = df['text'].apply(clean_text)
 
-
+    # random_state para garantir reproducibilidade
     data_val, data_test = train_test_split(df, test_size= 0.1, random_state= 42)
-    data_train, data_val = train_test_split(data_val, test_size= 0.222)
+    data_train, data_val = train_test_split(data_val, test_size= 0.222, random_state= 42)
 
     data_test.to_csv('C:/Users/Rafael (Aluízio)/Documents/GitHub/project-nlp/dataset/test_set/test_set.csv')
 
@@ -232,6 +258,7 @@ if __name__ == '__main__':
     token_size = len(token_to_id)
 
     model = LSTMPredictor(token_size, embedding_dim, hidden_dim, output_dim, embedding_matrix).to(device)
+    early_stopping = EarlyStopping(patience=5, min_delta=0.001)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr= 1e-4)
@@ -252,6 +279,10 @@ if __name__ == '__main__':
             optimizer.step()
         avg_loss = print_metrics(model, data_val, device= device, token_to_id= token_to_id, criterion= criterion)  
         val_loss.append(avg_loss)
+        early_stopping(avg_loss)
+        if early_stopping.early_stop:
+            print('Early Stopping acionado!!')
+            break
 
     try:
         with open('val_values.txt', 'wb') as file:
